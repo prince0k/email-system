@@ -62,6 +62,13 @@ interface Campaign {
     from_user: string;
     vmta: string;
   }>;
+  availableRoutes?: Array<{
+    _id?: string;
+    domain: string;
+    from_user: string;
+    vmta: string;
+    active?: boolean;
+  }>;
 
   trackingMode?: "from" | "domain";
   trackingDomain?: string;
@@ -100,6 +107,9 @@ export default function SendCampaignPage() {
 const suppressed =
   campaignData?.suppression?.status === "COMPLETED";
 const [suppressStats, setSuppressStats] = useState<any>(null);
+  const [selectedRoutes, setSelectedRoutes] = useState<
+    Array<{ domain: string; from_user: string; vmta: string }>
+  >([]);
 
   /* ================= FORMAT SETTINGS ================= */
   const [contentMode, setContentMode] = useState<"multipart" | "html">(
@@ -195,6 +205,9 @@ const [customHeaderBlock, setCustomHeaderBlock] = useState("");
     try {
       const campaignRes = await campaignApi.review(campaign);
       setCampaignData(campaignRes);
+      setSelectedRoutes(
+        Array.isArray(campaignRes?.routes) ? campaignRes.routes : []
+      );
 
       // ✅ Restore saved execution settings (SAFE WAY)
       if (campaignRes?.sendConfig) {
@@ -358,6 +371,9 @@ const reloadCampaign = async () => {
     const campaignRes = await campaignApi.review(campaign);
     
     setCampaignData(campaignRes);
+    setSelectedRoutes(
+      Array.isArray(campaignRes?.routes) ? campaignRes.routes : []
+    );
     // ✅ SAFE restore (no overwrite)
     if (campaignRes?.sendConfig) {
       const c = campaignRes.sendConfig;
@@ -461,6 +477,9 @@ const saveExecutionSettings = async () => {
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
+    if (!selectedRoutes.length) {
+      return setError("Please select at least one route.");
+    }
 
     if (mode === "TEST" && seedList.length === 0)
       return setError("Seed emails required for TEST mode.");
@@ -659,6 +678,7 @@ if (invalidSeeds.length > 0) {
         trackingMode,
         trackingDomain:
           trackingMode === "domain" ? trackingDomain.trim() : undefined,
+        routes: selectedRoutes,
         contentMode,
         textEncoding,
         htmlEncoding,
@@ -808,8 +828,69 @@ if (invalidSeeds.length > 0) {
             status={campaignData.status}
             runtimeOfferId={campaignData.runtimeOfferId}
             suppression={campaignData.suppression}
-            routes={campaignData.routes}
+            routes={selectedRoutes}
           />
+        </SectionCard>
+
+        <SectionCard>
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold">Routes</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {(campaignData.availableRoutes || []).map((route, index) => {
+                const key = `${route.vmta}|${route.domain}|${route.from_user}`;
+                const checked = selectedRoutes.some(
+                  (r) =>
+                    r.vmta === route.vmta &&
+                    r.domain === route.domain &&
+                    r.from_user === route.from_user
+                );
+
+                return (
+                  <label
+                    key={`${key}-${index}`}
+                    className="flex items-start gap-3 rounded-xl border border-border/60 bg-card/60 px-3 py-2 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedRoutes((prev) => [
+                            ...prev,
+                            {
+                              vmta: route.vmta,
+                              domain: route.domain,
+                              from_user: route.from_user,
+                            },
+                          ]);
+                          return;
+                        }
+
+                        setSelectedRoutes((prev) =>
+                          prev.filter(
+                            (r) =>
+                              !(
+                                r.vmta === route.vmta &&
+                                r.domain === route.domain &&
+                                r.from_user === route.from_user
+                              )
+                          )
+                        );
+                      }}
+                    />
+                    <span className="text-sm text-muted-foreground">
+                      {route.vmta} | {route.domain} | {route.from_user}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            {!campaignData.availableRoutes?.length && (
+              <p className="text-sm text-muted-foreground">
+                No active routes found on sender.
+              </p>
+            )}
+          </div>
         </SectionCard>
 
         <SectionCard>

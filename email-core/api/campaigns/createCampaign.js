@@ -66,13 +66,15 @@ export default async function createCampaign(req, res) {
       return res.status(400).json({ error: "missing_required_fields" });
     }
 
-    if (!Array.isArray(routes) || routes.length === 0) {
-      return res.status(400).json({ error: "routes_required" });
-    }
-
-    for (const r of routes) {
-      if (!r || !r.from_user || !r.domain || !r.vmta) {
+     if (routes !== undefined) {
+      if (!Array.isArray(routes)) {
         return res.status(400).json({ error: "invalid_route_structure" });
+      }
+
+      for (const r of routes) {
+        if (!r || !r.from_user || !r.domain || !r.vmta) {
+          return res.status(400).json({ error: "invalid_route_structure" });
+        }
       }
     }
 
@@ -347,7 +349,7 @@ console.error("🔥 Stack:", senderErr.stack);
       [{
         campaignName: cleanCampaignName,
         sender,
-        routes,
+        routes: Array.isArray(routes) ? routes : [],
         creativeId,
         offerId,
         runtimeOfferId: versionedOfferId,

@@ -67,6 +67,7 @@ export default async function runCampaign(req, res) {
       // HEADER BLOCK
       headerBlockMode,
       customHeaderBlock,
+      routes: selectedRoutes,
 
     } = req.body;
 
@@ -129,8 +130,24 @@ if (!senderDoc) {
 
 }
 
-    if (!Array.isArray(campaignDoc.routes) || campaignDoc.routes.length === 0) {
+   const requestedRoutes = Array.isArray(selectedRoutes)
+      ? selectedRoutes
+      : [];
+    const campaignRoutes = Array.isArray(campaignDoc.routes)
+      ? campaignDoc.routes
+      : [];
+    const effectiveRoutes =
+      requestedRoutes.length > 0 ? requestedRoutes : campaignRoutes;
+
+    if (!Array.isArray(effectiveRoutes) || effectiveRoutes.length === 0) {
       return res.status(400).json({ error: "campaign_routes_missing" });
+    }
+
+    let normalizedRoutes;
+    try {
+      normalizedRoutes = buildRoutes(effectiveRoutes);
+    } catch {
+      return res.status(400).json({ error: "invalid_route_structure" });
     }
 
     // 🔒 LIVE protection
@@ -312,7 +329,7 @@ if (mode === "LIVE") {
     const payload = {
       campaignName: campaignDoc.campaignName,
       mode,
-      routes: buildRoutes(campaignDoc.routes),
+      routes: normalizedRoutes,
       testRoutes,
       testSeeds,
       testTotalSend,
@@ -478,6 +495,7 @@ campaignDoc.sendConfig = {
 
     }
 
+    campaignDoc.routes = normalizedRoutes;
     await campaignDoc.save();
     console.log("DEBUG SENDCONFIG:", campaignDoc.sendConfig);
     return res.json({

@@ -88,6 +88,16 @@ if (campaignDoc.offerId) {
       console.error("CREATIVE LOAD FAILED:", err.message);
     }
 
+    const senderWithRoutes = campaignDoc.sender?._id
+      ? await SenderServer.findById(campaignDoc.sender._id)
+          .select("routes")
+          .lean()
+      : null;
+
+    const availableRoutes = Array.isArray(senderWithRoutes?.routes)
+      ? senderWithRoutes.routes.filter((r) => r?.active !== false)
+      : [];
+
     return res.json({
   campaignName: campaignDoc.campaignName,
   senderServerId: campaignDoc.sender?.name || null,
@@ -97,6 +107,7 @@ if (campaignDoc.offerId) {
   isp: campaignDoc.isp,
   segmentName: campaignDoc.segmentName,
   routes: campaignDoc.routes || [],
+  availableRoutes,
   status: campaignDoc.status,
 
   trackingMode: campaignDoc.trackingMode || "from",

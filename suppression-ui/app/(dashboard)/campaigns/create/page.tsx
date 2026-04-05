@@ -111,12 +111,6 @@ useEffect(() => {
       ...prev,
       creativeId: parsed.creativeId || "",
     }));
-
-    // 🔥 SET ROUTES
-    if (parsed.routes?.length) {
-      setRoutes(parsed.routes.map((r: any) => ({ route: r.route || r })));
-    }
-
     localStorage.removeItem("copyCampaignData");
 
   } catch (err) {
@@ -210,32 +204,6 @@ useEffect(() => {
 
 }, [selectedOffer, selectedServer, form.campaignName]);
 
-/* ================= ROUTES ================= */
-
-const addRouteBlock = () => {
-  setRoutes((prev) => [...prev, { route: null }]);
-};
-
-const removeRouteBlock = (index: number) => {
-  setRoutes((prev) => prev.filter((_, i) => i !== index));
-};
-
-const updateRoute = (index: number, routeId: string) => {
-  if (!selectedServer?.routes) return;
-
-  const routeObj = selectedServer.routes.find(
-    (r: any) => String(r._id) === routeId
-  );
-
-  if (!routeObj) return;
-
-  setRoutes((prev) => {
-    const updated = [...prev];
-    updated[index] = { route: routeObj };
-    return updated;
-  });
-};
-
   /* ================= VALIDATION ================= */
 
   const validate = () => {
@@ -245,24 +213,6 @@ const updateRoute = (index: number, routeId: string) => {
     if (!form.isp) return "ISP required";
     if (!form.segmentName) return "Segment required";
     if (!form.campaignName.trim()) return "Campaign name required";
-    if (!routes.length) return "At least one route required";
-
-    for (let i = 0; i < routes.length; i++) {
-      if (!routes[i].route) {
-        return `Incomplete route block ${i + 1}`;
-      }
-    }
-
-    // Prevent duplicate route selection
-    const selectedRouteIds = routes
-  .map((r) => r.route?._id)
-  .filter(Boolean);
-    const uniqueRouteIds = new Set(selectedRouteIds);
-
-    if (uniqueRouteIds.size !== selectedRouteIds.length) {
-      return "Duplicate routes selected";
-    }
-
     return null;
   };
 
@@ -290,13 +240,7 @@ const updateRoute = (index: number, routeId: string) => {
       isp: form.isp,
       segmentName: form.segmentName,
       scheduledDate: form.scheduledDate,
-      routes: routes.map((r) => ({
-        domain: r.route.domain,
-        from_user: r.route.from_user,
-        vmta: r.route.vmta,
-      })),
     };
-
     console.log("FINAL PAYLOAD:", payload);
 
     const response = await campaignApi.create(payload);
@@ -405,7 +349,7 @@ function Input({
           Create Campaign
         </h1>
         <p className="text-sm text-muted-foreground mt-2">
-          Configure sender, offer, routes and schedule
+          Configure sender, offer and schedule
         </p>
       </div>
 
@@ -426,7 +370,6 @@ function Input({
                 (s) => String(s._id) === e.target.value
               );
               setSelectedServer(server || null);
-              setRoutes([{ route: null }]);
               setForm((prev) => ({
                 ...prev,
                 senderId: e.target.value,
@@ -501,74 +444,6 @@ function Input({
           </div>
         )}
       </Section>
-
-      {/* ROUTES */}
-      {selectedServer && (
-        <Section title="Routes">
-          <div className="space-y-4">
-            {routes.map((block, index) => (
-              <div
-                key={index}
-                className="flex items-center gap-3"
-              >
-                <select
-                  value={block.route?._id || ""}
-                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
-                    updateRoute(index, e.target.value)
-                  }
-                  className="flex-1 bg-background border border-border/60 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                >
-                  <option value="">Select Route</option>
-                  {(selectedServer?.routes || [])
-                    .filter((r: any) => r.active !== false)
-                    .filter((r: any) =>
-                      !routes.some(
-                        (rt, i) => i !== index && rt.route?._id === r._id
-                      )
-                    )
-                    .map((r: any) => (
-                      <option key={r._id} value={r._id}>
-                        {r.vmta} | {r.domain} | {r.from_user}
-                      </option>
-                    ))}
-                </select>
-
-                <button
-                  onClick={() => removeRouteBlock(index)}
-                  disabled={routes.length === 1}
-                  className="px-3 py-2 text-xs rounded-xl bg-destructive/10 border border-destructive/30 text-destructive disabled:opacity-50"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-            <button
-              onClick={() => {
-                if (!selectedServer?.routes) return;
-
-                const activeRoutes = selectedServer.routes.filter(
-                  (r: any) => r.active !== false
-                );
-
-                const allRoutes = activeRoutes.map((r: any) => ({
-                  route: r,
-                }));
-
-                setRoutes(allRoutes);
-              }}
-              className="px-4 py-2 text-sm rounded-xl border border-border/60 bg-card/80 hover:bg-muted/40 transition"
-            >
-              Select All Routes
-            </button>
-            <button
-              onClick={addRouteBlock}
-              className="px-4 py-2 text-sm rounded-xl border border-border/60 bg-card/80 hover:bg-muted/40 transition"
-            >
-              + Add Route
-            </button>
-          </div>
-        </Section>
-      )}
 
       {/* FINAL SETTINGS */}
       <Section title="Final Settings">

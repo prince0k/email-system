@@ -289,7 +289,7 @@ scheduledAt: {
 
     routes: {
       type: [RouteSchema],
-      required: true,
+      default: [],
     },
 
     trackingMode: {

@@ -3,3 +3,4 @@ node_modules/
 logs/
 .next/
 dist/
+config/google-service.json
