@@ -1,6 +1,9 @@
 import { google } from "googleapis";
 import OpenLog from "../models/OpenLog.js";
 import ClickLog from "../models/ClickLog.js";
+import UnsubLog from "../models/UnsubLog.js";
+import OptoutLog from "../models/OptoutLog.js";
+import LinkToken from "../models/LinkToken.js";
 import Campaign from "../models/Campaign.js";
 
 const auth = new google.auth.GoogleAuth({
@@ -14,6 +17,37 @@ const SPREADSHEET_ID = "1v_QtGn8DKnYGoQVrGFDCFZ5JHZOpOppi40E9uZhJ1EI";
 
 // 🔥 SHEET NAME
 const SHEETS = ["IP Wise_Count"];
+
+const normalize = (v) => String(v || "").trim().toLowerCase();
+const safeIp = (v) => String(v || "").trim().replace(/\./g, "_");
+
+function addSenderMetric(map, offerId, senderKey, value, caster = (v) => v) {
+  const raw = String(senderKey || "").trim();
+  const normalized = normalize(raw);
+  const safe = safeIp(raw);
+  const keys = new Set([raw, normalized, safe]);
+
+  keys.forEach((k) => {
+    if (!k) return;
+    map[`${offerId}_${k}`] = caster(value);
+  });
+}
+
+function readSenderMetric(map, offerId, senderKeys = []) {
+  for (const senderKey of senderKeys) {
+    const raw = String(senderKey || "").trim();
+    const normalized = normalize(raw);
+    const safe = safeIp(raw);
+    const variants = [raw, normalized, safe];
+
+    for (const variant of variants) {
+      if (!variant) continue;
+      const key = `${offerId}_${variant}`;
+      if (map[key] !== undefined) return map[key];
+    }
+  }
+  return undefined;
+}
 
 export async function syncGoogleSheet() {
   for (const SHEET_NAME of SHEETS) {
@@ -33,54 +67,73 @@ async function syncIPSheet(SHEET_NAME) {
   const rows = res.data.values || [];
   if (!rows.length) return;
 
-  const IP_COL = 2;     // column C
-  const OFFER_COL = 3;  // column D (IMPORTANT)
+  const IP_COL = 2; // column C
+  const OFFER_COL = 3; // column D
 
-  // 🔥 collect all IP + Offer pairs
-  const pairs = rows
-    .map(r => ({
-      ip: r[IP_COL],
-      offerId: r[OFFER_COL]
-    }))
-    .filter(r => r.ip && r.offerId);
+  // collect all identifiers + offer pairs
+  const pairs = rows.map(r => ({
+  vmta: String(r[IP_COL] || "").replace(/\./g, "_").trim(),
+  offerId: r[OFFER_COL]
+}))
+    .filter(r => r.offerId);
 
   if (!pairs.length) return;
 
-  const ips = [...new Set(pairs.map(p => p.ip))];
-  const offerIds = [...new Set(pairs.map(p => p.offerId))];
+  const offerIds = [...new Set(pairs.map(p => String(p.offerId || "").trim()).filter(Boolean))];
 
-  /* =========================
-     🔥 FETCH CAMPAIGNS
-  ========================= */
+  /* ========================= FETCH CAMPAIGNS ========================= */
 
   const campaigns = await Campaign.find({
     runtimeOfferId: { $in: offerIds }
-  }).select("runtimeOfferId execution.vmtaStats").lean();
+  }).select(
+    "runtimeOfferId execution.vmtaStats execution.vmtaHard execution.vmtaSoft execution.delivered execution.hardBounce execution.softBounce"
+  ).lean();
 
-  // 🔥 MAP: offerId + ip → delivered
+  // MAP: offerId + (vmta/ip) -> delivered / bounce
   const vmtaMap = {};
+  const bounceMap = {};
+  const offerDeliveredMap = {};
+  const offerBounceMap = {};
 
   campaigns.forEach(c => {
     const offerId = c.runtimeOfferId;
     const vmtaStats = c.execution?.vmtaStats || {};
+    const vmtaHard = c.execution?.vmtaHard || {};
+    const vmtaSoft = c.execution?.vmtaSoft || {};
 
-    Object.entries(vmtaStats).forEach(([ip, count]) => {
-      const key = `${offerId}_${ip}`;
-      vmtaMap[key] = count;
+    offerDeliveredMap[offerId] = Number(c.execution?.delivered || 0);
+    offerBounceMap[offerId] = Number(c.execution?.hardBounce || 0) + Number(c.execution?.softBounce || 0);
+
+    Object.entries(vmtaStats).forEach(([senderKey, count]) => {
+      addSenderMetric(vmtaMap, offerId, senderKey, count, (v) => Number(v || 0));
+    });
+
+    const bounceKeys = new Set([...Object.keys(vmtaHard), ...Object.keys(vmtaSoft)]);
+    bounceKeys.forEach(senderKey => {
+      const hard = Number(vmtaHard[senderKey] || 0);
+      const soft = Number(vmtaSoft[senderKey] || 0);
+      addSenderMetric(bounceMap, offerId, senderKey, hard + soft, (v) => Number(v || 0));
     });
   });
 
-  /* =========================
-     🔥 OPEN / CLICK AGG
-  ========================= */
+  /* ========================= OPEN / CLICK / OPT / UNS / CMP ========================= */
 
-  const [openAgg, clickAgg] = await Promise.all([
+  const [openAgg, clickAgg, unsubAgg, optoutAgg, complaintAgg] = await Promise.all([
 
     OpenLog.aggregate([
-      { $match: { ip: { $in: ips }, offer_id: { $in: offerIds } } },
+      {
+        $match: {
+          offer_id: { $in: offerIds },
+        }
+      },
       {
         $group: {
-          _id: { ip: "$ip", offer_id: "$offer_id" },
+          _id: {
+  key: {
+    $ifNull: ["$vmta", "$ip"]
+  },
+  offer_id: "$offer_id"
+},
           total: { $sum: 1 },
           emails: { $addToSet: "$email" }
         }
@@ -94,10 +147,20 @@ async function syncIPSheet(SHEET_NAME) {
     ]),
 
     ClickLog.aggregate([
-      { $match: { ip: { $in: ips }, offer_id: { $in: offerIds }, is_bot_click: false } },
+      {
+        $match: {
+          offer_id: { $in: offerIds },
+          is_bot_click: false,
+        }
+      },
       {
         $group: {
-          _id: { ip: "$ip", offer_id: "$offer_id" },
+          _id: {
+  key: {
+    $ifNull: ["$vmta", "$ip"]
+  },
+  offer_id: "$offer_id"
+},
           total: { $sum: 1 },
           emails: { $addToSet: "$email" }
         }
@@ -108,61 +171,146 @@ async function syncIPSheet(SHEET_NAME) {
           unique: { $size: "$emails" }
         }
       }
-    ])
+    ]),
+
+    UnsubLog.aggregate([
+      {
+        $match: {
+          offer_id: { $in: offerIds },
+        }
+      },
+      { $group: { _id: {
+  key: {
+    $ifNull: ["$vmta", "$ip"]
+  },
+  offer_id: "$offer_id"
+}, count: { $sum: 1 } } }
+    ]),
+
+    OptoutLog.aggregate([
+      {
+        $match: {
+          offer_id: { $in: offerIds },
+        }
+      },
+      { $group: { _id: {
+  key: {
+    $ifNull: ["$vmta", "$ip"]
+  },
+  offer_id: "$offer_id"
+}, count: { $sum: 1 } } }
+    ]),
+
+    LinkToken.aggregate([
+      {
+        $match: {
+          offer_id: { $in: offerIds },
+          complaint: true,
+        }
+      },
+      { $group: { _id: {
+  key: {
+    $ifNull: ["$vmta", "$ip"]
+  },
+  offer_id: "$offer_id"
+}, count: { $sum: 1 } } }
+    ]),
   ]);
 
-  // 🔥 MAPS
+  // MAPS
   const openMap = {};
   openAgg.forEach(i => {
-    const safeIp = (i._id.ip || "").replace(/\./g, "_");
-    const key = `${i._id.offer_id}_${safeIp}`;
-    openMap[key] = i;
+    const vmtaRaw = (i._id.vmta || "").trim();
+    addSenderMetric(openMap, i._id.offer_id, vmtaRaw, i);
   });
 
   const clickMap = {};
   clickAgg.forEach(i => {
-    const safeIp = (i._id.ip || "").replace(/\./g, "_");
-    const key = `${i._id.offer_id}_${safeIp}`;
-    clickMap[key] = i;
+    const vmtaRaw = (i._id.vmta || "").trim();
+addSenderMetric(clickMap, i._id.offer_id, vmtaRaw, i);
   });
 
-  /* =========================
-     🔥 UPDATE SHEET
-  ========================= */
+  const unsubMap = {};
+  unsubAgg.forEach(i => {
+    const vmtaRaw = (i._id.vmta || "").trim();
+addSenderMetric(unsubMap, i._id.offer_id, vmtaRaw, i.count);
+  });
+
+  const optoutMap = {};
+  optoutAgg.forEach(i => {
+    const vmtaRaw = (i._id.vmta || "").trim();
+addSenderMetric(optoutMap, i._id.offer_id, vmtaRaw, i.count);
+  });
+
+  const complaintMap = {};
+  complaintAgg.forEach(i => {
+    const vmtaRaw = (i._id.vmta || "").trim();
+addSenderMetric(complaintMap, i._id.offer_id, vmtaRaw, i.count);
+  });
+
+  /* ========================= UPDATE SHEET ========================= */
 
   const updates = [];
+
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     const actualRow = START_ROW + i;
 
-    const ip = (row[IP_COL] || "").trim();
-    const offerId = (row[OFFER_COL] || "").trim();
+    const rawIp = String(row[IP_COL] || "").trim();
+    const safeVmta = rawIp.replace(/\./g, "_");
 
-    if (!ip || !offerId) continue;
 
-    const safeIp = ip.replace(/\./g, "_");
-    const key = `${offerId}_${safeIp}`;
+    const offerId = String(row[OFFER_COL] || "").trim();
 
-    const delivered = vmtaMap[key] ?? row[4] ?? 0;
+    if (!offerId) continue;
 
-    const open = openMap[key]?.total || 0;
-    const uniqueOpen = openMap[key]?.unique || 0;
+    const senderCandidates = [rawIp, safeVmta];
 
-    const click = clickMap[key]?.total || 0;
-    const uniqueClick = clickMap[key]?.unique || 0;
+    const delivered =
+      readSenderMetric(vmtaMap, offerId, senderCandidates) ??
+      offerDeliveredMap[offerId] ??
+      0;
+    const totalBounce =
+      readSenderMetric(bounceMap, offerId, senderCandidates) ??
+      offerBounceMap[offerId] ??
+      0;
 
+    const openData = readSenderMetric(openMap, offerId, senderCandidates) || { total: 0, unique: 0 };
+    const clickData = readSenderMetric(clickMap, offerId, senderCandidates) || { total: 0, unique: 0 };
+
+    const open = openData.total || 0;
+    const uniqueOpen = openData.unique || 0;
+
+    const click = clickData.total || 0;
+    const uniqueClick = clickData.unique || 0;
+
+    const unsub = readSenderMetric(unsubMap, offerId, senderCandidates) || 0;
+    const optout = readSenderMetric(optoutMap, offerId, senderCandidates) || 0;
+    const complaints = readSenderMetric(complaintMap, offerId, senderCandidates) || 0;
+
+    const openRate = delivered ? (open / delivered) * 100 : 0;
+    const uniqueOpenRate = delivered ? (uniqueOpen / delivered) * 100 : 0;
     const ctr = uniqueOpen ? (uniqueClick / uniqueOpen) * 100 : 0;
+    const optRate = delivered ? (optout / delivered) * 100 : 0;
+    const unsubRate = delivered ? (unsub / delivered) * 100 : 0;
+    const complaintRate = delivered ? (complaints / delivered) * 100 : 0;
+    const sentApprox = delivered + totalBounce;
+    const bounceRate = sentApprox ? (totalBounce / sentApprox) * 100 : 0;
 
     updates.push({
-      range: `${SHEET_NAME}!E${actualRow}:K${actualRow}`,
+      range: `${SHEET_NAME}!E${actualRow}:N${actualRow}`,
       values: [[
         delivered,
         open,
-        uniqueOpen,
         click,
-        uniqueClick,
-        ctr.toFixed(2)
+        openRate.toFixed(2),
+        uniqueOpenRate.toFixed(2),
+        ctr.toFixed(2),
+        optRate.toFixed(2),
+        unsubRate.toFixed(2),
+        complaintRate.toFixed(2),
+        bounceRate.toFixed(2),
       ]]
     });
   }
