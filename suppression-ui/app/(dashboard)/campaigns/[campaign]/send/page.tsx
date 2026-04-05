@@ -110,6 +110,8 @@ const [suppressStats, setSuppressStats] = useState<any>(null);
   const [selectedRoutes, setSelectedRoutes] = useState<
     Array<{ domain: string; from_user: string; vmta: string }>
   >([]);
+  const [routeSaving, setRouteSaving] = useState(false);
+  const [routeSaveError, setRouteSaveError] = useState("");
 
   /* ================= FORMAT SETTINGS ================= */
   const [contentMode, setContentMode] = useState<"multipart" | "html">(
@@ -461,6 +463,28 @@ const saveExecutionSettings = async () => {
 
   } catch (err: any) {
     setError(err.message || "Failed to save settings");
+  }
+};
+
+const saveRoutes = async (
+  nextRoutes: Array<{ domain: string; from_user: string; vmta: string }>
+) => {
+  try {
+    setRouteSaving(true);
+    setRouteSaveError("");
+    await campaignApi.saveConfig(campaign, { routes: nextRoutes });
+    setCampaignData((prev) =>
+      prev
+        ? {
+            ...prev,
+            routes: nextRoutes,
+          }
+        : prev
+    );
+  } catch (err: any) {
+    setRouteSaveError(err.message || "Failed to save routes");
+  } finally {
+    setRouteSaving(false);
   }
 };
 
@@ -834,7 +858,15 @@ if (invalidSeeds.length > 0) {
 
         <SectionCard>
           <div className="space-y-4">
-            <h3 className="text-lg font-semibold">Routes</h3>
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-lg font-semibold">Routes</h3>
+              <span className="text-xs text-muted-foreground">
+                {routeSaving ? "Saving..." : "Saved automatically"}
+              </span>
+            </div>
+            {routeSaveError && (
+              <p className="text-sm text-destructive">{routeSaveError}</p>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {(campaignData.availableRoutes || []).map((route, index) => {
                 const key = `${route.vmta}|${route.domain}|${route.from_user}`;
@@ -854,28 +886,31 @@ if (invalidSeeds.length > 0) {
                       type="checkbox"
                       checked={checked}
                       onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedRoutes((prev) => [
-                            ...prev,
-                            {
-                              vmta: route.vmta,
-                              domain: route.domain,
-                              from_user: route.from_user,
-                            },
-                          ]);
-                          return;
-                        }
+                        setSelectedRoutes((prev) => {
+                          let nextRoutes = prev;
+                          if (e.target.checked) {
+                            nextRoutes = [
+                              ...prev,
+                              {
+                                vmta: route.vmta,
+                                domain: route.domain,
+                                from_user: route.from_user,
+                              },
+                            ];
+                          } else {
+                            nextRoutes = prev.filter(
+                              (r) =>
+                                !(
+                                  r.vmta === route.vmta &&
+                                  r.domain === route.domain &&
+                                  r.from_user === route.from_user
+                                )
+                            );
+                          }
 
-                        setSelectedRoutes((prev) =>
-                          prev.filter(
-                            (r) =>
-                              !(
-                                r.vmta === route.vmta &&
-                                r.domain === route.domain &&
-                                r.from_user === route.from_user
-                              )
-                          )
-                        );
+                          saveRoutes(nextRoutes);
+                          return nextRoutes;
+                        });
                       }}
                     />
                     <span className="text-sm text-muted-foreground">
