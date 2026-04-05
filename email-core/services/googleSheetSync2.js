@@ -114,13 +114,15 @@ async function syncIPSheet(SHEET_NAME) {
   // 🔥 MAPS
   const openMap = {};
   openAgg.forEach(i => {
-    const key = `${i._id.offer_id}_${i._id.ip}`;
+    const safeIp = (i._id.ip || "").replace(/\./g, "_");
+    const key = `${i._id.offer_id}_${safeIp}`;
     openMap[key] = i;
   });
 
   const clickMap = {};
   clickAgg.forEach(i => {
-    const key = `${i._id.offer_id}_${i._id.ip}`;
+    const safeIp = (i._id.ip || "").replace(/\./g, "_");
+    const key = `${i._id.offer_id}_${safeIp}`;
     clickMap[key] = i;
   });
 
@@ -134,14 +136,15 @@ async function syncIPSheet(SHEET_NAME) {
     const row = rows[i];
     const actualRow = START_ROW + i;
 
-    const ip = row[IP_COL];
-    const offerId = row[OFFER_COL];
+    const ip = (row[IP_COL] || "").trim();
+    const offerId = (row[OFFER_COL] || "").trim();
 
     if (!ip || !offerId) continue;
 
-    const key = `${offerId}_${ip}`;
+    const safeIp = ip.replace(/\./g, "_");
+    const key = `${offerId}_${safeIp}`;
 
-    const delivered = vmtaMap[key] || 0;
+    const delivered = vmtaMap[key] ?? row[4] ?? 0;
 
     const open = openMap[key]?.total || 0;
     const uniqueOpen = openMap[key]?.unique || 0;

@@ -62,13 +62,17 @@ export default async function updatePmtaStats(req, res) {
 
     /* FORCE NUMBER VALUES */
 
-    const incData = {
-  "execution.delivered": deliveredCount || 0,
-  "execution.hardBounce": hardCount || 0,
-  "execution.softBounce": softCount || 0
-};
-
-    console.log("Increment data:", incData);
+  if (
+  !Object.keys(delivered_vmta).length &&
+  !Object.keys(delivered_isp).length &&
+  !Object.keys(hard_vmta).length &&
+  !Object.keys(soft_vmta).length &&
+  !Object.keys(hard_isp).length &&
+  !Object.keys(soft_isp).length
+) {
+  console.log("⚠️ No detailed stats");
+  return res.json({ status: "no_detailed_updates" });
+}
 
     const result = await Campaign.updateOne(
   { runtimeOfferId: offerId },
@@ -76,21 +80,57 @@ export default async function updatePmtaStats(req, res) {
     $inc: {
       "execution.delivered": deliveredCount || 0,
       "execution.hardBounce": hardCount || 0,
-      "execution.softBounce": softCount || 0
+      "execution.softBounce": softCount || 0,
+
+      ...Object.fromEntries(
+        Object.entries(delivered_vmta).map(([ip, val]) => {
+  const safeIp = ip.replace(/\./g, "_");
+
+  return [
+    `execution.vmtaStats.${safeIp}`,
+    Number(val)
+  ];
+})
+      ),
+
+      ...Object.fromEntries(
+        Object.entries(delivered_isp).map(([isp, val]) => [
+          `execution.ispStats.${isp}`,
+          Number(val) || 0
+        ])
+      ),
+
+      ...Object.fromEntries(
+        Object.entries(hard_vmta).map(([ip, val]) => [
+          `execution.vmtaHard.${ip}`,
+          Number(val) || 0
+        ])
+      ),
+
+      ...Object.fromEntries(
+        Object.entries(soft_vmta).map(([ip, val]) => [
+          `execution.vmtaSoft.${ip}`,
+          Number(val) || 0
+        ])
+      ),
+
+      ...Object.fromEntries(
+        Object.entries(hard_isp).map(([isp, val]) => [
+          `execution.ispHard.${isp}`,
+          Number(val) || 0
+        ])
+      ),
+
+      ...Object.fromEntries(
+        Object.entries(soft_isp).map(([isp, val]) => [
+          `execution.ispSoft.${isp}`,
+          Number(val) || 0
+        ])
+      )
     },
 
     $set: {
-      "execution.lastStatusUpdate": new Date(),
-
-      // 🔥 NEW DATA STORE
-      "execution.vmtaStats": delivered_vmta,
-      "execution.ispStats": delivered_isp,
-
-      "execution.vmtaHard": hard_vmta,
-      "execution.vmtaSoft": soft_vmta,
-
-      "execution.ispHard": hard_isp,
-      "execution.ispSoft": soft_isp
+      "execution.lastStatusUpdate": new Date()
     }
   }
 );
@@ -111,9 +151,11 @@ if (Array.isArray(hardEmails) && hardEmails.length > 0) {
 
   console.log("Writing hard emails to file:", hardEmails);
 
-  fs.appendFileSync(
-    HARD_FILE,
-    hardEmails.join("\n") + "\n",
+  const uniqueEmails = [...new Set(hardEmails)];
+
+fs.appendFileSync(
+  HARD_FILE,
+  uniqueEmails.join("\n") + "\n",
     { encoding: "utf8", flag: "a" }
   );
 

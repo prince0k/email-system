@@ -189,19 +189,26 @@ const SendConfigSchema = new mongoose.Schema(
 /* ======================
    EXECUTION METRICS
 ====================== */
-const ExecutionSchema = new mongoose.Schema(
-  {
-    delivered: { type: Number, default: 0 },   // 🔥 ADD THIS
-    totalSent: { type: Number, default: 0 },
-    failures: { type: Number, default: 0 },
-    hardBounce: { type: Number, default: 0 },   // 🔥 ADD
-    softBounce: { type: Number, default: 0 },   // 🔥 ADD
-    startedAt: Date,
-    completedAt: Date,
-    lastStatusUpdate: Date,
-  },
-  { _id: false }
-);
+const ExecutionSchema = new mongoose.Schema({
+  delivered: { type: Number, default: 0 },
+  totalSent: { type: Number, default: 0 },
+  failures: { type: Number, default: 0 },
+  hardBounce: { type: Number, default: 0 },
+  softBounce: { type: Number, default: 0 },
+
+  vmtaStats: { type: Object, default: {} },
+ispStats: { type: Object, default: {} },
+
+vmtaHard: { type: Object, default: {} },
+vmtaSoft: { type: Object, default: {} },
+
+ispHard: { type: Object, default: {} },
+ispSoft: { type: Object, default: {} },
+
+  startedAt: Date,
+  completedAt: Date,
+  lastStatusUpdate: Date,
+}, { _id: false });
 
 /* ======================
    MAIN CAMPAIGN SCHEMA
