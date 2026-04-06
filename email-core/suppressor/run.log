@@ -1,0 +1,5 @@
+nohup: ignoring input
+Error: Failed to open input input.txt
+
+Caused by:
+    No such file or directory (os error 2)
