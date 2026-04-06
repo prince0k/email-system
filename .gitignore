@@ -4,3 +4,4 @@ logs/
 .next/
 dist/
 config/google-service.json
+email-core/config/google-service.json
