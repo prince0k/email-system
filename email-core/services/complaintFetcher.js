@@ -51,7 +51,7 @@ if (fs.existsSync(FILE_PATH)) {
 const extractTokenFromUrl = (text) => {
   if (!text) return null;
 
-  const match = text.match(/2\.php\?k=([a-f0-9]{32,})/i);
+  const match = text.match(/(?:2|4)\.php\?k=([a-f0-9]{32,})/i);
   return match ? match[1] : null;
 };
 
@@ -89,64 +89,97 @@ export const fetchComplaintEmails = () => {
           }
 
           console.log(`📨 Found ${results.length} unread emails`);
-
+          const tasks = [];
           const fetch = imap.fetch(results, {
             bodies: "",
             markSeen: true,
           });
 
           fetch.on("message", (msg) => {
-            msg.on("body", (stream) => {
-              simpleParser(stream, async (err, parsed) => {
-                if (err || !parsed) return;
+  msg.on("body", (stream) => {
 
-                try {
-                  const content = parsed.text || parsed.html || "";
+    const task = new Promise((resolveTask) => {
 
-                  // 🔥 TOKEN
-                  const token = extractTokenFromUrl(content);
-                  if (!token) return;
+      simpleParser(stream, async (err, parsed) => {
+        if (err || !parsed) return resolveTask();
 
-                  console.log("🔑 Token:", token);
+        try {
+          let content = "";
 
-                  // 🔥 DB FETCH
-                  const doc = await LinkToken.findOne({ token }).lean();
+          // main body
+          if (parsed.text) content += parsed.text;
+          if (parsed.html) content += parsed.html;
 
-                  if (!doc?.email) {
-                    console.log("❌ No email for token:", token);
-                    return;
-                  }
+          // 🔥 attachments (important for FBL)
+          if (parsed.attachments && parsed.attachments.length) {
+            for (const att of parsed.attachments) {
+              if (att.contentType === "message/rfc822") {
+                content += att.content.toString();
+              }
+            }
+          }
 
-                  const email = doc.email;
+          // headers fallback
+          const raw =
+            parsed?.headerLines?.map((h) => h.line).join("\n") || "";
 
-                  console.log("📧 Complaint:", email);
+          const fullContent = content + "\n" + raw;
 
-                  // 🔥 SAVE FILE
-                  appendUniqueEmail(email);
+          const token = extractTokenFromUrl(fullContent);
 
-                  // 🔥 UPDATE DB
-                  await LinkToken.updateOne(
-                    { token },
-                    {
-                      $set: {
-                        complaint: true,
-                        complaintAt: new Date(),
-                      },
-                    }
-                  );
+          if (!token) {
+            console.log("⚠️ Token not found");
+            return resolveTask();
+          }
 
-                } catch (e) {
-                  console.error("Processing error:", e);
-                }
-              });
-            });
-          });
+          console.log("🔑 Token:", token);
 
-          fetch.once("end", () => {
-            console.log("✅ Done processing emails");
-            imap.end();
-            resolve();
-          });
+          const doc = await LinkToken.findOne({ token }).lean();
+
+          if (!doc?.email) {
+            console.log("❌ No email for token:", token);
+            return resolveTask();
+          }
+
+          const email = doc.email;
+
+          console.log("📧 Complaint:", email);
+
+          appendUniqueEmail(email);
+
+          // ✅ only update if not already complaint
+          if (!doc.complaint) {
+            await LinkToken.updateOne(
+              { token },
+              {
+                $set: {
+                  complaint: true,
+                  complaintAt: new Date(),
+                },
+              }
+            );
+
+            console.log("🔥 Complaint marked:", token);
+          }
+
+        } catch (e) {
+          console.error("Processing error:", e);
+        }
+
+        resolveTask();
+      });
+    });
+
+    tasks.push(task);
+  });
+});
+          fetch.once("end", async () => {
+  await Promise.all(tasks); // 🔥 WAIT for all parsing
+
+  console.log("✅ Done processing emails");
+  imap.end();
+  resolve();
+});
         });
       });
     });

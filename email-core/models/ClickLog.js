@@ -48,6 +48,10 @@ const ClickLogSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    click_count: {
+      type: Number,
+      default: 1
+    },
 
     /* ======================
        SENDER META (FROM TOKEN)

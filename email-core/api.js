@@ -9,7 +9,7 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 
 import connectMongo from "./config/mongo.js";
-import { startPmtaMonitor } from "./workers/pmtaMonitorWorker.js";
+// import { startPmtaMonitor } from "./workers/pmtaMonitorWorker.js";
 
 /* ======================
   ROUTES
@@ -44,17 +44,10 @@ import trimSegment from "./api/segments/trim.js";
 import combineSegments from "./api/segments/combine.js";
 import splitSegment from "./api/segments/split.js";
 /* TRACKING (PUBLIC) */
-import trackClick from "./api/tracking/click.js";
-import trackOpen from "./api/tracking/open.js";
-import trackOptout from "./api/tracking/optout.js";
-import trackUnsub from "./api/tracking/unsub.js";
-import pmtaServers from "./api/pmta/servers.js";
-import pmtaServerRoute from "./api/pmta/server.js";
 import pmtaStats from "./api/pmta/stats.js";
-import pmtaQueues from "./api/pmta/queues.js";
-import pmtaDomains from "./api/pmta/domains.js";
-import registerToken from "./api/token.js";
-import pmtaExecute from "./api/pmta/execute.js";
+import pmtaHistory from "./api/pmta/history.js";
+import commandRoute from "./api/pmta/command.js";
+import senderPerformance from "./api/reports/senderPerformance.js";
 /* MIDDLEWARE */
 import auth from "./middleware/auth.js";
 import checkPermission from "./middleware/checkPermission.js";
@@ -152,10 +145,6 @@ app.get("/api/health", (req, res) =>
 );
 
 /* Tracking — NEVER protect */
-app.get("/t/click", trackClick);
-app.get("/t/open", trackOpen);
-app.get("/t/optout", trackOptout);
-app.get("/t/unsub", trackUnsub);
 app.post("/api/campaigns/updateTotalSent", updateTotalSent);
 app.post("/api/campaigns/updatePmtaStats", updatePmtaStats);
 app.post("/api/campaigns/updateStatus", updateStatusPublic);
@@ -253,6 +242,12 @@ app.get(
   senderDailyStats
 );
 
+app.get(
+  "/api/reports/senderPerformance",
+  auth,
+  checkPermission("reports.view"),
+  senderPerformance
+);
 /* ======================
   SENDERS
 ====================== */
@@ -263,12 +258,14 @@ app.use(
   senderRoutes
 );
 
-app.use("/api/pmta/servers", auth, pmtaServers);
+
 app.use("/api/pmta/stats", auth, pmtaStats);
-app.use("/api/pmta/queues", auth, pmtaQueues);
-app.use("/api/pmta/domains", auth, pmtaDomains);
-app.use("/api/pmta/server", pmtaServerRoute);
-app.use("/api/pmta/execute", pmtaExecute);
+app.use("/api/pmta/history", auth, pmtaHistory);
+app.use(
+  "/api/pmta/command",
+  auth,
+  commandRoute
+);
 /* ======================
   SEGMENTS
 ====================== */
@@ -322,11 +319,6 @@ app.post(
   trimSegment
 );
 
-/* ======================
-  TOKEN
-====================== */
-
-app.post("/api/token", registerToken);
 
 /* ======================
   STATIC OUTPUT FILES (OPTIONAL)

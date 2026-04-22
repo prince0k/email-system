@@ -15,6 +15,7 @@ const auth = new google.auth.GoogleAuth({
 });
 
 const sheets = google.sheets({ version: "v4", auth });
+const normalize = (v) => v?.toString().trim();
 
 const SPREADSHEET_ID = "1v_QtGn8DKnYGoQVrGFDCFZ5JHZOpOppi40E9uZhJ1EI";
 
@@ -57,8 +58,11 @@ async function syncSingleSheet(SHEET_NAME) {
   // 🔥 unique offerIds
   const OFFER_COL = 29; // ⚠️ ek baar sheet me confirm kar lena
 
-  const offerIds = [...new Set(rows.map(r => r[OFFER_COL]).filter(Boolean))];
-
+  const offerIds = [
+    ...new Set(
+      rows.map(r => normalize(r[OFFER_COL])).filter(Boolean)
+    )
+  ];
   if (!offerIds.length) {
     console.log(`⚠️ No offerIds in ${SHEET_NAME}`);
     return;
@@ -69,7 +73,7 @@ async function syncSingleSheet(SHEET_NAME) {
   runtimeOfferId: { $in: offerIds }
 })
 .populate("creativeId", "name")
-.select("runtimeOfferId offerId creativeId execution sendConfig") // 🔥 ADD
+.select("runtimeOfferId offerId creativeId execution sendConfig segmentName") // 🔥 ADD
 .lean();
 
 
@@ -77,12 +81,16 @@ async function syncSingleSheet(SHEET_NAME) {
 
   const campaignMap = {};
   campaigns.forEach(c => {
-    campaignMap[c.runtimeOfferId] = c;
-  });
+  campaignMap[normalize(c.runtimeOfferId)] = c;
+});
 
-  const match = {
-    offer_id: { $in: offerIds },
-  };
+  const rawOfferIds = rows
+  .map(r => r[OFFER_COL])
+  .filter(Boolean);
+
+const match = {
+  offer_id: { $in: rawOfferIds },
+};
 
   // 🔥 FIXED OPEN AGGREGATION (IMPORTANT)
   const [openAgg, clickAgg, unsubAgg, optoutAgg, complaintAgg] = await Promise.all([
@@ -187,19 +195,29 @@ async function syncSingleSheet(SHEET_NAME) {
     const row = rows[i];
     const actualRow = START_ROW + i;
 
-    const offer_id = row[OFFER_COL];
+    const offer_id = row[OFFER_COL]?.toString().trim();
 
     const status = row[14]; // column N (Status)
 
     if (!offer_id || status !== "Sent") continue;
+    
+    const campaign = campaignMap[normalize(offer_id)];
 
-    const campaign = campaignMap[offer_id];
+    if (!campaign) {
+      console.log("❌ NOT FOUND:", offer_id);
+      continue;
+    }
+
+    if (!campaign?.segmentName) {
+      console.log("❌ SEGMENT MISSING:", offer_id, campaign);
+    }
     if (!campaign) continue;
 
     const sent = campaign?.execution?.totalSent || 0;
     const delivered = campaign?.execution?.delivered || 0;
     const hardBounce = campaign?.execution?.hardBounce || 0;
     const softBounce = campaign?.execution?.softBounce || 0;
+    // const segment = campaign?.segmentName || "NA";
 
     const subject = campaign?.sendConfig?.subject || "";
     const fromLine = campaign?.sendConfig?.fromName || "";
@@ -241,17 +259,21 @@ async function syncSingleSheet(SHEET_NAME) {
       complaintRate.toFixed(2),
       bounceRate.toFixed(2)
     ]]
-  });
-    updates.push({
-    range: `${SHEET_NAME}!AE${actualRow}:AG${actualRow}`,
-    values: [[
-      creativeName,
-      fromLine,
-      subject
-    ]]
-  });
+    });
+      updates.push({
+      range: `${SHEET_NAME}!AE${actualRow}:AG${actualRow}`,
+      values: [[
+        creativeName,
+        fromLine,
+        subject
+      ]]
+    });
+    
+      updates.push({
+      range: `${SHEET_NAME}!AC${actualRow}`,
+      values: [[campaign?.segmentName || ""]]
+    });
   }
-
   if (updates.length > 0) {
     await sheets.spreadsheets.values.batchUpdate({
       spreadsheetId: SPREADSHEET_ID,

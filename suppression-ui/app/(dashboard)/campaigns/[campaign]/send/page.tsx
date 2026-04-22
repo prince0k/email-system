@@ -82,7 +82,8 @@ export default function SendCampaignPage() {
       : "";
 
   const [campaignData, setCampaignData] = useState<Campaign | null>(null);
-
+  const [bulkInput, setBulkInput] = useState("");
+  const [debounceTimer, setDebounceTimer] = useState<any>(null);
   /* ================= CREATIVE ================= */
   const [creativeOverride, setCreativeOverride] = useState("");
 
@@ -289,6 +290,18 @@ const [customHeaderBlock, setCustomHeaderBlock] = useState("");
   window.addEventListener("click", handleClick);
   return () => window.removeEventListener("click", handleClick);
 }, []);
+
+useEffect(() => {
+  if (!selectedRoutes.length) return;
+
+  const formatted = selectedRoutes
+    .map(r => `${r.vmta}=>${r.domain}=>${r.from_user}`)
+    .join("\n");
+
+  if (formatted !== bulkInput) {
+    setBulkInput(formatted);
+  }
+}, [selectedRoutes]);
 
   useEffect(() => {
   if (!campaignData?.status) return;
@@ -937,6 +950,42 @@ if (invalidSeeds.length > 0) {
                 {routeSaving ? "Saving..." : "Saved automatically"}
               </span>
             </div>
+            {/* 🔥 BULK ROUTE INPUT */}
+            <textarea
+              placeholder="ip=>domain=>from_user"
+              className="w-full h-32 p-3 rounded bg-black text-white border text-sm"
+              value={bulkInput}
+              onChange={(e) => {
+                const value = e.target.value;
+                setBulkInput(value);
+
+                if (debounceTimer) clearTimeout(debounceTimer);
+
+                const timer = setTimeout(() => {
+                  const lines = value
+                    .split("\n")
+                    .map(l => l.trim())
+                    .filter(Boolean);
+
+                  const parsed = lines.map(line => {
+                  const [vmta, domain, from_user] = line.split("=>").map(x => x.trim());
+                  if (!vmta || !domain || !from_user) return null;
+                  return { vmta, domain, from_user };
+                }).filter((r): r is { vmta: string; domain: string; from_user: string } => !!r);
+
+                if (!parsed.length) return;
+
+                const unique = Array.from(
+                  new Map(parsed.map(r => [`${r.vmta}-${r.domain}`, r])).values()
+                );
+
+                setSelectedRoutes(unique);
+                saveRoutes(unique); // 🔥 autosave
+                }, 500);
+
+                setDebounceTimer(timer);
+              }}
+            />
             {routeSaveError && (
               <p className="text-sm text-destructive">{routeSaveError}</p>
             )}
@@ -953,42 +1002,72 @@ if (invalidSeeds.length > 0) {
                 return (
                   <label
                     key={`${key}-${index}`}
-                    className="flex items-start gap-3 rounded-xl border border-border/60 bg-card/60 px-3 py-2 cursor-pointer"
+                    className="flex flex-col gap-2 rounded-xl border border-border/60 bg-card/60 px-3 py-2 cursor-pointer"
                   >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={(e) => {
-                        setSelectedRoutes((prev) => {
-                          let nextRoutes = prev;
-                          if (e.target.checked) {
-                            nextRoutes = [
-                              ...prev,
-                              {
-                                vmta: route.vmta,
-                                domain: route.domain,
-                                from_user: route.from_user,
-                              },
-                            ];
-                          } else {
-                            nextRoutes = prev.filter(
-                              (r) =>
-                                !(
-                                  r.vmta === route.vmta &&
-                                  r.domain === route.domain &&
-                                  r.from_user === route.from_user
-                                )
-                            );
-                          }
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          setSelectedRoutes((prev) => {
+                            let nextRoutes = prev;
+                            if (e.target.checked) {
+                              nextRoutes = [
+                                ...prev,
+                                {
+                                  vmta: route.vmta,
+                                  domain: route.domain,
+                                  from_user: route.from_user,
+                                },
+                              ];
+                            } else {
+                              nextRoutes = prev.filter(
+                                (r) =>
+                                  !(
+                                    r.vmta === route.vmta &&
+                                    r.domain === route.domain &&
+                                    r.from_user === route.from_user
+                                  )
+                              );
+                            }
 
-                          saveRoutes(nextRoutes);
-                          return nextRoutes;
-                        });
-                      }}
-                    />
-                    <span className="text-sm text-muted-foreground">
-                      {route.vmta} | {route.domain} | {route.from_user}
-                    </span>
+                            saveRoutes(nextRoutes);
+                            return nextRoutes;
+                          });
+                        }}
+                      />
+
+                      <span className="text-sm text-muted-foreground">
+                        {route.vmta} | {route.domain}
+                      </span>
+                    </div>
+
+                    {/* 🔥 YAHI ADD KARNA HAI */}
+                    {checked && (
+                      <input
+                        type="text"
+                        placeholder="Enter From Email"
+                        className="w-full px-2 py-1 rounded bg-black text-white border text-sm"
+                        value={
+                          selectedRoutes.find(
+                            (r) =>
+                              r.vmta === route.vmta &&
+                              r.domain === route.domain
+                          )?.from_user || ""
+                        }
+                        onChange={(e) => {
+                          const updated = selectedRoutes.map((r) =>
+                            r.vmta === route.vmta &&
+                            r.domain === route.domain
+                              ? { ...r, from_user: e.target.value }
+                              : r
+                          );
+
+                          setSelectedRoutes(updated);
+                          saveRoutes(updated); // 🔥 autosave
+                        }}
+                      />
+                    )}
                   </label>
                 );
               })}

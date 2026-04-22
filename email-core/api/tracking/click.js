@@ -125,32 +125,35 @@ export default async function trackClick(req, res) {
 
         await Promise.allSettled([
           ClickLog.updateOne(
-            {
-              offer_id: link.offer_id,
-              rl: link.rl,
-              day,
-              ...(email ? { email } : {}),
-            },
-            {
-              $setOnInsert: {
-                offer_id: link.offer_id,
-                campaignId: deploy?.campaignId || null,
-                offerId: deploy?.offerId || null,
-                email,
-                send_domain: link.send_domain || null,
-                vmta: link.vmta || null,
-                list_id: link.list_id || null,
-                rl: link.rl,
-                url: redirectUrl,
-                ip,
-                userAgent,
-                country,
-                day,
-                is_bot_click: bot,
-              },
-            },
-            { upsert: true }
-          ),
+  {
+    offer_id: link.offer_id,
+    rl: link.rl,
+    day,
+    ...(email ? { email } : {}),
+  },
+  {
+    $setOnInsert: {
+      offer_id: link.offer_id,
+      campaignId: deploy?.campaignId || null,
+      offerId: deploy?.offerId || null,
+      email,
+      send_domain: link.send_domain || null,
+      vmta: link.vmta || null,
+      list_id: link.list_id || null,
+      rl: link.rl,
+      url: redirectUrl,
+      ip,
+      userAgent,
+      country,
+      day,
+      is_bot_click: bot,
+    },
+    $inc: {
+      click_count: 1
+    }
+  },
+  { upsert: true }
+),
           LinkToken.updateOne(
             { token },
             [

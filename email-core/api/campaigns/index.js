@@ -159,9 +159,62 @@ router.post("/:campaign/pause", loadCampaign, async (req, res) => {
 router.post("/:campaign/resume", loadCampaign, async (req, res) => {
   try {
     const campaignDoc = req.campaignDoc;
+    const {
+      totalSend,
+      sendInSeconds,
+      sendInMinutes,
+      sendInHours,
+    } = req.body || {};
 
     if (!validateTransition(campaignDoc.status, "RUNNING")) {
       return res.status(400).json({ error: "invalid_transition" });
+    }
+
+    const parsePositiveInt = (value) => {
+      if (value === undefined || value === null || value === "") return null;
+      const parsed = parseInt(value, 10);
+      return Number.isNaN(parsed) || parsed <= 0 ? "INVALID" : parsed;
+    };
+
+    const parsedTotalSend = parsePositiveInt(totalSend);
+    const parsedSendInSeconds = parsePositiveInt(sendInSeconds);
+    const parsedSendInMinutes = parsePositiveInt(sendInMinutes);
+    const parsedSendInHours = parsePositiveInt(sendInHours);
+
+    if (
+      parsedTotalSend === "INVALID" ||
+      parsedSendInSeconds === "INVALID" ||
+      parsedSendInMinutes === "INVALID" ||
+      parsedSendInHours === "INVALID"
+    ) {
+      return res.status(400).json({ error: "invalid_resume_send_config" });
+    }
+
+    const runtimeConfig = {};
+
+    // Prefer explicit resume payload, fallback to previously saved sendConfig.
+    const effectiveTotalSend =
+      parsedTotalSend ?? campaignDoc.sendConfig?.totalSend ?? null;
+    const effectiveSendInSeconds =
+      parsedSendInSeconds ?? campaignDoc.sendConfig?.sendInSeconds ?? null;
+    const effectiveSendInMinutes =
+      parsedSendInMinutes ?? campaignDoc.sendConfig?.sendInMinutes ?? null;
+    const effectiveSendInHours =
+      parsedSendInHours ?? campaignDoc.sendConfig?.sendInHours ?? null;
+
+    if (effectiveTotalSend) runtimeConfig.totalSend = effectiveTotalSend;
+    if (effectiveSendInSeconds) runtimeConfig.sendInSeconds = effectiveSendInSeconds;
+    if (effectiveSendInMinutes) runtimeConfig.sendInMinutes = effectiveSendInMinutes;
+    if (effectiveSendInHours) runtimeConfig.sendInHours = effectiveSendInHours;
+
+    // At least one throttle unit should be present if totalSend is present.
+    if (
+      runtimeConfig.totalSend &&
+      !runtimeConfig.sendInSeconds &&
+      !runtimeConfig.sendInMinutes &&
+      !runtimeConfig.sendInHours
+    ) {
+      return res.status(400).json({ error: "resume_throttle_required" });
     }
 
     const senderResponse = await callSender(
@@ -169,7 +222,9 @@ router.post("/:campaign/resume", loadCampaign, async (req, res) => {
       "updateControl.php",
       {
         campaignName: req.campaignName,
+        action: "RESUME",
         status: "RUNNING",
+        ...runtimeConfig,
       }
     );
 
@@ -177,10 +232,20 @@ router.post("/:campaign/resume", loadCampaign, async (req, res) => {
       return res.status(500).json({ error: "sender_failed" });
     }
 
+    // Persist updated values so next resume uses latest values automatically.
+    campaignDoc.sendConfig = campaignDoc.sendConfig || {};
+    if (parsedTotalSend) campaignDoc.sendConfig.totalSend = parsedTotalSend;
+    if (parsedSendInSeconds) campaignDoc.sendConfig.sendInSeconds = parsedSendInSeconds;
+    if (parsedSendInMinutes) campaignDoc.sendConfig.sendInMinutes = parsedSendInMinutes;
+    if (parsedSendInHours) campaignDoc.sendConfig.sendInHours = parsedSendInHours;
+
     campaignDoc.status = "RUNNING";
     await campaignDoc.save();
 
-    res.json({ status: "resumed" });
+    res.json({
+      status: "resumed",
+      runtimeConfig,
+    });
   } catch (err) {
     res.status(500).json({ error: "resume_failed" });
   }

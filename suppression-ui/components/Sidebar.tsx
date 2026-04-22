@@ -61,6 +61,7 @@ const NAV_SECTIONS: NavSection[] = [
     title: "Campaigns",
     items: [
       { href: "/campaigns", label: "Campaigns", icon: Mail, requiredPermission: "campaign.view" },
+      { href: "/campaigns/live-ready", label: "Live Ready Dashboard", icon: LayoutDashboard, requiredPermission: "campaign.view" },
       { href: "/campaigns/create", label: "Create Campaign", icon: Send, requiredPermission: "campaign.create" },
     ],
   },
@@ -77,7 +78,8 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { href: "/logs/opens", label: "Open Logs", icon: Eye, requiredPermission: "reports.view" },
       { href: "/logs/clicks", label: "Click Logs", icon: MousePointerClick, requiredPermission: "reports.view" },
-      { href: "/reports", label: "Reports", icon: FileText, requiredPermission: "reports.view" },
+      { href: "/reports/sender", label: "Reports", icon: FileText, requiredPermission: "reports.view" },
+      { href: "/reports/sender-performance", label: "Sender Performance", icon: FileText, requiredPermission: "reports.view" },
     ],
   },
   {
@@ -103,11 +105,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: "Moniter PMTA",
     items: [
-      { href: "/pmta", label: "PMTA", icon: LayoutDashboard, requiredPermission: "campaign.view" },
       { href: "/pmta/stats", label: "PMTA STATS", icon: Eye, requiredPermission: "campaign.view" },
-      { href: "/pmta/queues", label: "QUEUES", icon: Eye, requiredPermission: "campaign.view" },
-      { href: "/pmta/domains", label: "DOMAINS", icon: Eye, requiredPermission: "campaign.view" },
-      { href: "/pmta/servers", label: "SERVERS", icon: Eye, requiredPermission: "campaign.view" },
     ],
   },
 

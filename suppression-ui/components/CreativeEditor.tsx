@@ -140,25 +140,32 @@ export default function CreativeEditor({
           <input
             type="file"
             accept="image/*"
+            multiple
             onChange={async (e) => {
+              const files = e.target.files
+              if (!files || files.length === 0) return
 
-              const file = e.target.files?.[0]
+              const form = new FormData()
 
-              if (!file) return
-
-              try {
-
-                const url = await uploadImage(file)
-
-                alert("Image uploaded successfully:\n" + url)
-
-              } catch (err) {
-
-                console.error(err)
-                alert("Image upload failed")
-
+              for (let i = 0; i < files.length; i++) {
+                form.append("images", files[i])
               }
 
+              form.append("offerId", offerId)
+
+              try {
+                const res = await api.post(
+                  "/offers/creatives/uploadImage",
+                  form
+                )
+
+                console.log(res.data.files)
+
+                alert(`Uploaded ${res.data.files.length} images`)
+              } catch (err) {
+                console.error(err)
+                alert("Upload failed")
+              }
             }}
           />
         </div>

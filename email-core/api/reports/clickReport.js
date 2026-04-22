@@ -50,22 +50,20 @@ export default [
   {
     $group: {
       _id: { offer_id: "$offer_id", rl: "$rl" },
-      total_clicks: { $sum: 1 }
+      total_clicks: { $sum: "$click_count" },
+      unique_clicks: { $sum: 1 }
     }
   },
-
   {
     $group: {
       _id: "$_id.offer_id",
-
       total_clicks: { $sum: "$total_clicks" },
-      unique_clicks: { $sum: "$total_clicks" },
-
+      unique_clicks: { $sum: "$unique_clicks" },
       links: {
         $push: {
           rl: "$_id.rl",
           total_clicks: "$total_clicks",
-          unique_clicks: "$total_clicks"
+          unique_clicks: "$unique_clicks"
         }
       }
     }

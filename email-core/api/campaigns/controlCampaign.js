@@ -5,7 +5,13 @@ import { validateTransition } from "./helpers/validateTransition.js";
 export default async function controlCampaign(req, res) {
   try {
     const rawCampaign = req.params.campaign;
-    const { action } = req.body;
+    const {
+      action,
+      totalSend,
+      sendInSeconds,
+      sendInMinutes,
+      sendInHours,
+    } = req.body || {};
 
     if (!rawCampaign || typeof rawCampaign !== "string") {
       return res.status(400).json({ error: "invalid_campaign" });
@@ -35,6 +41,26 @@ export default async function controlCampaign(req, res) {
 
     const targetStatus = actionToStatus[action];
 
+    const parsePositiveInt = (value) => {
+      if (value === undefined || value === null || value === "") return null;
+      const parsed = parseInt(value, 10);
+      return Number.isNaN(parsed) || parsed <= 0 ? "INVALID" : parsed;
+    };
+
+    const parsedTotalSend = parsePositiveInt(totalSend);
+    const parsedSendInSeconds = parsePositiveInt(sendInSeconds);
+    const parsedSendInMinutes = parsePositiveInt(sendInMinutes);
+    const parsedSendInHours = parsePositiveInt(sendInHours);
+
+    if (
+      parsedTotalSend === "INVALID" ||
+      parsedSendInSeconds === "INVALID" ||
+      parsedSendInMinutes === "INVALID" ||
+      parsedSendInHours === "INVALID"
+    ) {
+      return res.status(400).json({ error: "invalid_resume_send_config" });
+    }
+
     /* =====================
        TERMINAL STATE BLOCK
     ===================== */
@@ -55,14 +81,42 @@ export default async function controlCampaign(req, res) {
        CALL SENDER
     ===================== */
 
+     const runtimeConfig = {};
+    if (action === "RESUME") {
+      const effectiveTotalSend =
+        parsedTotalSend ?? campaign.sendConfig?.totalSend ?? null;
+      const effectiveSendInSeconds =
+        parsedSendInSeconds ?? campaign.sendConfig?.sendInSeconds ?? null;
+      const effectiveSendInMinutes =
+        parsedSendInMinutes ?? campaign.sendConfig?.sendInMinutes ?? null;
+      const effectiveSendInHours =
+        parsedSendInHours ?? campaign.sendConfig?.sendInHours ?? null;
+
+      if (effectiveTotalSend) runtimeConfig.totalSend = effectiveTotalSend;
+      if (effectiveSendInSeconds) runtimeConfig.sendInSeconds = effectiveSendInSeconds;
+      if (effectiveSendInMinutes) runtimeConfig.sendInMinutes = effectiveSendInMinutes;
+      if (effectiveSendInHours) runtimeConfig.sendInHours = effectiveSendInHours;
+
+      if (
+        runtimeConfig.totalSend &&
+        !runtimeConfig.sendInSeconds &&
+        !runtimeConfig.sendInMinutes &&
+        !runtimeConfig.sendInHours
+      ) {
+        return res.status(400).json({ error: "resume_throttle_required" });
+      }
+    }
+
     const senderResponse = await callSender(
-  campaign.sender,
-  "updateControl.php",
-  {
-    campaignName: campaign.campaignName,
-    action,
-  }
-);
+      campaign.sender,
+      "updateControl.php",
+      {
+        campaignName: campaign.campaignName,
+        action,
+        status: targetStatus,
+        ...runtimeConfig,
+      }
+    );
 
     if (
       !senderResponse ||
@@ -83,6 +137,14 @@ export default async function controlCampaign(req, res) {
 
     campaign.status = targetStatus;
 
+    if (action === "RESUME") {
+      campaign.sendConfig = campaign.sendConfig || {};
+      if (parsedTotalSend) campaign.sendConfig.totalSend = parsedTotalSend;
+      if (parsedSendInSeconds) campaign.sendConfig.sendInSeconds = parsedSendInSeconds;
+      if (parsedSendInMinutes) campaign.sendConfig.sendInMinutes = parsedSendInMinutes;
+      if (parsedSendInHours) campaign.sendConfig.sendInHours = parsedSendInHours;
+    }
+
     if (targetStatus === "STOPPED") {
       campaign.execution.completedAt = new Date();
     }
@@ -95,6 +157,7 @@ export default async function controlCampaign(req, res) {
       status: "ok",
       campaign: campaign.campaignName,
       newStatus: targetStatus,
+      runtimeConfig,
     });
 
   } catch (err) {

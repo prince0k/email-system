@@ -31,39 +31,54 @@ function toNumberOrNull(value) {
 
 function generateSegmentName({
   type,
-  vid,
   isp,
-  sendingDomain,
-  vmta,
   from,
   to,
   minOpen,
-  maxOpen,
   minClick,
-  maxClick,
-  sourceSegment
+  sourceSegment,
+  vertical = "general",
+  geo = "us",
+  source = "email"
 }) {
-
   const parts = [];
 
-  /* TYPE */
-  if (type === "click") parts.push("clicker");
-  else if (type === "open") parts.push("opener");
-  else parts.push("engager");
+  /* =====================
+     1. VERTICAL (business first)
+  ===================== */
+  parts.push(clean(vertical));
 
-  /* OFFER */
-  if (vid) parts.push(`vid${vid}`);
+  /* =====================
+     2. GEO
+  ===================== */
+  parts.push(geo);
 
-  /* ISP */
-  if (isp) parts.push(clean(isp));
+  /* =====================
+     3. SOURCE
+  ===================== */
+  parts.push(source);
 
-  /* DOMAIN */
-  if (sendingDomain) parts.push(`dom${clean(sendingDomain)}`);
+  /* =====================
+     4. TYPE
+  ===================== */
+  if (type === "click") parts.push("click");
+  else if (type === "open") parts.push("open");
+  else parts.push("both");
 
-  /* VMTA */
-  if (vmta) parts.push(`vmta${clean(vmta)}`);
+  /* =====================
+     5. INTENT (IMPORTANT)
+  ===================== */
+  let intent = "cold";
 
-  /* DATE */
+  if (minClick >= 2) intent = "hot";
+  else if (minClick === 1) intent = "warm";
+  else if (minOpen >= 2) intent = "warm";
+
+  parts.push(intent);
+
+  /* =====================
+     6. WINDOW (DATE RANGE)
+  ===================== */
   const today = new Date().toISOString().slice(0, 10);
 
   if (!from && !to) {
@@ -87,23 +102,20 @@ function generateSegmentName({
     parts.push(`${format(from)}-${format(to)}`);
   }
 
-  /* OPEN RANGE */
-  if (minOpen || maxOpen) {
-    parts.push(`o${minOpen || 0}_${maxOpen || "x"}`);
-  }
+  /* =====================
+     7. ISP (last)
+  ===================== */
+  if (isp) parts.push(clean(isp));
 
-  /* CLICK RANGE */
-  if (minClick || maxClick) {
-    parts.push(`c${minClick || 0}_${maxClick || "x"}`);
-  }
+  /* =====================
+     8. SOURCE FLAG (optional)
+  ===================== */
+  if (sourceSegment) parts.push("src");
 
-  /* SOURCE SEGMENT */
-  if (sourceSegment) {
-    parts.push("src");
-  }
-
-  /* UNIQUE (IMPORTANT) */
-  parts.push(Date.now().toString().slice(-5)); // short unique id
+  /* =====================
+     9. UNIQUE ID
+  ===================== */
+  parts.push(Date.now().toString().slice(-5));
 
   return parts.join("_");
 }
@@ -140,36 +152,28 @@ export default async function build(req, res) {
     }
 
     let offerVid = null;
+let offerVertical = "general"; // default
 
-    if (offerId) {
+if (offerId) {
+  const offer = await Offer.findById(offerId)
+    .select("vid vertical")
+    .lean();
 
-      const offer = await Offer
-      .findById(offerId)
-      .select("vid")
-      .lean();
-
-      console.log("offer:", offer);
-
-      if (offer) {
-        offerVid = offer.vid || null;
-      }
-
-    }
-
+  if (offer) {
+    offerVid = offer.vid || null;
+    offerVertical = offer.vertical || "general"; // ✅ FIX
+  }
+}
     if(!name){
       name = generateSegmentName({
         type,
-        vid: offerVid,
         isp,
-        sendingDomain,
-        vmta,
         from,
         to,
-        minOpen,
-        maxOpen,
-        minClick,
-        maxClick,
-        sourceSegment
+        minOpen: minOpenValue,
+        minClick: minClickValue,
+        sourceSegment,
+        vertical: offerVertical // ✅ FIX
       });
     }
 

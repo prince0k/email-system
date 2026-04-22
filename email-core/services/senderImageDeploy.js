@@ -6,51 +6,107 @@ import SenderServer from "../models/SenderServer.js"
 
 const INTERNAL_KEY = process.env.SENDER_INTERNAL_KEY
 
-export async function deployImageToSenders(filePath){
+const MAX_RETRIES = 2
+const CONCURRENCY = 5 // 🔥 limit parallel uploads
 
- const fileName = path.basename(filePath)
+/* =================================
+   HELPER: RETRY LOGIC
+================================= */
 
- const senders = await SenderServer
-  .find({ active: true })
-  .select("baseUrl name")
-
- if(!senders.length){
-  console.warn("No active sender servers found")
-  return
- }
-
- const tasks = senders.map(async (sender)=>{
+async function uploadWithRetry(sender, filePath, fileName) {
 
   const uploadUrl = `${sender.baseUrl}/uploadImage.php`
 
-  const form = new FormData()
+  for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
 
-  form.append("image", fs.createReadStream(filePath), fileName)
+    try {
 
-  try{
+      const form = new FormData()
+      form.append("image", fs.createReadStream(filePath), fileName)
 
-   await axios.post(uploadUrl, form, {
-    headers:{
-     ...form.getHeaders(),
-     "X-Internal-Key": INTERNAL_KEY
-    },
-    timeout:15000
-   })
+      const res = await axios.post(uploadUrl, form, {
+        headers: {
+          ...form.getHeaders(),
+          "X-Internal-Key": INTERNAL_KEY
+        },
+        timeout: 30000 // 🔥 safer
+      })
 
-   console.log(`✅ image deployed to ${sender.name}`)
+      // 🔥 basic validation
+      if (res.status !== 200) {
+        throw new Error(`Invalid status ${res.status}`)
+      }
 
-  }catch(err){
+      console.log(`✅ ${sender.name} (attempt ${attempt})`)
+      return true
 
-   console.error(
-    `❌ image deploy failed on ${sender.name}`,
-    err.response?.data || err.message
-   )
+    } catch (err) {
 
+      console.warn(
+        `⚠️ ${sender.name} failed (attempt ${attempt})`,
+        err.response?.data || err.message
+      )
+
+      if (attempt > MAX_RETRIES) {
+        console.error(`❌ FINAL FAIL: ${sender.name}`)
+        return false
+      }
+    }
+  }
+}
+
+/* =================================
+   MAIN FUNCTION
+================================= */
+
+export async function deployImageToSenders(filePath) {
+
+  if (!fs.existsSync(filePath)) {
+    console.error("❌ File does not exist:", filePath)
+    return
   }
 
- })
+  const fileName = path.basename(filePath)
 
- await Promise.all(tasks)
+  const senders = await SenderServer
+    .find({ active: true })
+    .select("baseUrl name")
 
- return fileName
+  if (!senders.length) {
+    console.warn("⚠️ No active sender servers found")
+    return
+  }
+
+  console.log(`🚀 Deploying ${fileName} to ${senders.length} servers`)
+
+  /* =================================
+     CONCURRENCY CONTROL
+  ================================= */
+
+  const queue = [...senders]
+  const workers = []
+
+  for (let i = 0; i < CONCURRENCY; i++) {
+
+    const worker = (async () => {
+
+      while (queue.length) {
+
+        const sender = queue.shift()
+        if (!sender) break
+
+        await uploadWithRetry(sender, filePath, fileName)
+
+      }
+
+    })()
+
+    workers.push(worker)
+  }
+
+  await Promise.all(workers)
+
+  console.log(`✅ Deployment finished: ${fileName}`)
+
+  return fileName
 }
